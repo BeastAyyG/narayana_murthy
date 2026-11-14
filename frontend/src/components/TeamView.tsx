@@ -13,7 +13,7 @@ import { ArrowClockwise } from '@phosphor-icons/react';
 import ManagerCheckins from './ManagerCheckins';
 import {
   Chip, Dot, EmptyState, ErrorNotice, Field, Meter, Reveal,
-  SectionHead, SkeletonRows, Stat,
+  SectionHead, SkeletonRows, Stat, strainDot,
 } from './ui';
 
 const API_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:8000';
@@ -126,6 +126,12 @@ function parseEmployees(text: string): string[] {
   return [...seen];
 }
 
+function isoDate(daysAgo: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - daysAgo);
+  return d.toISOString().slice(0, 10);
+}
+
 const DEFAULT_EMPLOYEES = parseEmployees(
   (import.meta.env.VITE_TEAM_EMPLOYEES as string | undefined) ?? '',
 );
@@ -145,6 +151,160 @@ function scoreColor(score: number): string {
   if (score >= 70) return 'var(--ok)';
   if (score >= 40) return 'var(--warn)';
   return 'var(--bad)';
+}
+
+/** Weekly digest: one row per roster member for the last 7 days. Who, how
+ *  much, any flags. Built from GET /focus/daily per employee per day plus
+ *  GET /activity/strain-summary; there is no dedicated digest endpoint. */
+interface DigestDailyRow {
+  focus_score?: number | null;
+  break_compliance?: { required_breaks?: number; taken_breaks?: number; compliant?: boolean };
+}
+
+interface DigestRow {
+  id: string;
+  days: number;
+  avgFocus: number | null;
+  breaks: string;
+  compliant: boolean | null;
+  strain: string;
+  flag: string | null;
+}
+
+function WeeklyDigestPanel({ employees, officeId }: { employees: string[]; officeId: string }) {
+  const [state, setState] = useState<PanelState<DigestRow[]>>({
+    status: 'idle', data: null, detail: null,
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      if (employees.length === 0) {
+        setState({ status: 'empty', data: null, detail: 'no employees selected' });
+        return;
+      }
+      setState({ status: 'loading', data: null, detail: null });
+      try {
+        const strainByEmployee = new Map<string, string>();
+        try {
+          const items = asArray<StrainSummaryItem>(await getJson('/activity/strain-summary'));
+          for (const it of items) {
+            strainByEmployee.set(String(it.employee_id).toLowerCase(), String(it.strain_level ?? 'unknown'));
+          }
+        } catch {
+          // Strain is a best-effort column; the digest still works without it.
+        }
+        const rows: DigestRow[] = [];
+        let firstError: string | null = null;
+        await Promise.all(
+          employees.map(async (id) => {
+            const days = [...Array(7)].map((_, i) => isoDate(i));
+            const results = await Promise.all(
+              days.map(async (d) => {
+                try {
+                  const row = await getJson<DigestDailyRow>(
+                    withOffice(`/focus/daily?employee_id=${encodeURIComponent(id)}&date=${d}`, officeId),
+                  );
+                  return { date: d, row };
+                } catch (err) {
+                  if (!firstError) firstError = err instanceof Error ? err.message : String(err);
+                  return { date: d, row: null };
+                }
+              }),
+            );
+            const withData = results.filter((r) => r.row && typeof r.row.focus_score === 'number');
+            if (withData.length === 0) return;
+            const scores = withData.map((r) => r.row!.focus_score as number);
+            const avgFocus = scores.reduce((a, b) => a + b, 0) / scores.length;
+            const latest = withData[0].row!.break_compliance;
+            const compliant = typeof latest?.compliant === 'boolean' ? latest.compliant : null;
+            const breaks =
+              latest && typeof latest.taken_breaks === 'number' && typeof latest.required_breaks === 'number'
+                ? `${latest.taken_breaks}/${latest.required_breaks}`
+                : '-';
+            const strain = strainByEmployee.get(id.toLowerCase()) ?? 'unknown';
+            const flags: string[] = [];
+            if (strain.toLowerCase() === 'red') flags.push('High strain');
+            if (compliant === false) flags.push('Needs breaks');
+            rows.push({
+              id,
+              days: withData.length,
+              avgFocus,
+              breaks,
+              compliant,
+              strain,
+              flag: flags.length > 0 ? flags.join(', ') : null,
+            });
+          }),
+        );
+        if (cancelled) return;
+        if (rows.length > 0) {
+          rows.sort((a, b) => a.id.localeCompare(b.id));
+          setState({ status: 'ready', data: rows, detail: null });
+        } else if (firstError) {
+          setState({ status: 'unavailable', data: null, detail: firstError });
+        } else {
+          setState({ status: 'empty', data: null, detail: 'no focus rows for these employees in the last 7 days' });
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setState({
+            status: 'unavailable',
+            data: null,
+            detail: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+    };
+    void load();
+    return () => { cancelled = true; };
+  }, [employees, officeId]);
+
+  return (
+    <PanelShell title="Weekly Digest" endpoint="GET /focus/daily?employee_id=...&date=... (last 7 days) + GET /activity/strain-summary">
+      {state.status === 'loading' && <SkeletonRows rows={3} height={44} />}
+      {state.status === 'ready' && state.data && (
+        <div className="table-wrap" style={{ border: 0 }}>
+          <table className="ledger">
+            <thead>
+              <tr>
+                <th>Employee</th>
+                <th>Days with data</th>
+                <th>Avg focus</th>
+                <th>Breaks (latest day)</th>
+                <th>Strain</th>
+                <th>Flag</th>
+              </tr>
+            </thead>
+            <tbody>
+              {state.data.map((r) => (
+                <tr key={r.id}>
+                  <td className="id">{r.id}</td>
+                  <td className="num">{r.days} / 7</td>
+                  <td className="num">{r.avgFocus === null ? '-' : r.avgFocus.toFixed(1)}</td>
+                  <td className="num">{r.breaks}</td>
+                  <td>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      <Dot tone={strainDot(r.strain)} />{r.strain}
+                    </span>
+                  </td>
+                  <td>
+                    {r.flag ? <Chip tone={r.flag.includes('High strain') ? 'bad' : 'warn'}>{r.flag}</Chip> : '-'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {state.status === 'empty' && (
+        <EmptyState title="No digest data" body={state.detail ?? 'Nothing to aggregate for these employees.'} />
+      )}
+      {state.status === 'unavailable' && (
+        <ErrorNotice message={`Focus endpoint unavailable: ${state.detail}. This panel needs the /focus router.`} />
+      )}
+    </PanelShell>
+  );
 }
 
 /** Average focus score across the team (GET /focus/daily per employee). */
@@ -532,8 +692,11 @@ export default function TeamView({ officeId = "" }: { officeId?: string }) {
             </div>
           </div>
           <p style={{ color: 'var(--text-2)', fontSize: 13, margin: 0 }}>
-            Defaults come from VITE_TEAM_EMPLOYEES. Each panel below is independent; if a
-            backend endpoint is missing, only that panel reports it.
+            Defaults come from VITE_TEAM_EMPLOYEES. The digest below is one row per roster
+            member: days with data, average focus, latest-day breaks and strain level, plus
+            any flag. It shows only what the roster endpoints return; personal trend data
+            stays personal (see Trends). Each panel below is independent; if a backend
+            endpoint is missing, only that panel reports it.
           </p>
         </section>
       </Reveal>
@@ -541,6 +704,7 @@ export default function TeamView({ officeId = "" }: { officeId?: string }) {
       <Reveal><ManagerCheckins /></Reveal>
 
       <div key={refreshKey}>
+        <Reveal><WeeklyDigestPanel employees={employees} officeId={officeId} /></Reveal>
         <Reveal><FocusPanel employees={employees} officeId={officeId} /></Reveal>
         <Reveal><StrainPanel employees={employees} officeId={officeId} /></Reveal>
         <Reveal><BreakCompliancePanel employees={employees} officeId={officeId} /></Reveal>
