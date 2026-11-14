@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { fetchEvents } from './api';
-import type { DetectionEvent } from './types';
+import { fetchEvents, getPositions } from './api';
+import type { DetectionEvent, PersonPosition } from './types';
 import MastStatus from './components/MastStatus';
 import EventsTable from './components/EventsTable';
 import CameraFilter from './components/CameraFilter';
@@ -16,27 +16,33 @@ import RoomMapTab from './components/RoomMapTab';
 import OfficeSelector from './components/OfficeSelector';
 import ExportButton from './components/ExportButton';
 import WellnessDashboard from './components/WellnessDashboard';
+import { KnownPeopleList, UnknownPeoplePanel } from './components/IdentityPanels';
+import GeofenceManager from './components/GeofenceManager';
 
 const POLL_INTERVAL_MS = 5000;
 const POLL_LIMIT = 100;
 
-type Tab = 'events' | 'activity' | 'presence' | 'focus' | 'security' | 'policy' | 'team' | 'analytics' | 'roommap' | 'personal';
+type Tab = 'events' | 'roommap' | 'identity' | 'activity' | 'presence' | 'focus' | 'security' | 'policy' | 'team' | 'analytics' | 'personal' | 'geofence';
 
 const TABS: { id: Tab; label: string; kicker: string; blurb: string }[] = [
   { id: 'events', label: 'Vision Events', kicker: 'Camera network', blurb: 'Detection feed from every camera zone, refreshed live.' },
+  { id: 'roommap', label: 'Room Map', kicker: 'Live floor plan', blurb: 'Tracked persons, dwell heatmap and occupancy timeline.' },
+  { id: 'identity', label: 'Identity', kicker: 'Who was seen', blurb: 'Unknown sightings to review and the registry of known people.' },
   { id: 'activity', label: 'Activity', kicker: 'Workstation telemetry', blurb: 'Input telemetry, strain signals and app usage per machine.' },
   { id: 'presence', label: 'Presence', kicker: 'Floor state', blurb: 'Camera sightings matched against workstation input.' },
   { id: 'focus', label: 'Focus', kicker: 'Deep work', blurb: 'Daily deep-work scoring, streaks and break compliance.' },
   { id: 'security', label: 'Security', kicker: 'Anomaly feed', blurb: 'USB, after-hours and write-burst anomaly feed.' },
   { id: 'policy', label: 'Policy', kicker: 'Rules and privacy', blurb: 'Working-time rules, violation checks and privacy controls.' },
   { id: 'team', label: 'Team', kicker: 'Aggregates', blurb: 'Focus, strain, break compliance and presence per team.' },
-  { id: 'personal', label: 'My Wellness', kicker: 'Employee-only', blurb: 'Your private activity summary, optional wellness data and self-coaching tools.' },
   { id: 'analytics', label: 'Trends', kicker: 'Week over week', blurb: 'Weekly focus and strain movement.' },
-  { id: 'roommap', label: 'Room Map', kicker: 'Live floor plan', blurb: 'Tracked persons, dwell heatmap and occupancy timeline.' },
+  { id: 'personal', label: 'Wellness', kicker: 'Employee-only', blurb: 'Your private activity summary, optional wellness data and self-coaching tools.' },
+  { id: 'geofence', label: 'Geofence', kicker: 'Zones and crossings', blurb: 'Drawn zones on the camera maps and their entry and exit alerts.' },
 ];
 
 const PAGE_TITLES: Record<Tab, string> = {
   events: 'Vision Events',
+  roommap: 'Room Map',
+  identity: 'Identity',
   activity: 'Workstation Activity',
   presence: 'Presence',
   focus: 'Focus Score',
@@ -44,8 +50,8 @@ const PAGE_TITLES: Record<Tab, string> = {
   policy: 'Policy and Privacy',
   team: 'Team view',
   analytics: 'Trends',
-  roommap: 'Room Map',
   personal: 'My Wellness',
+  geofence: 'Geofence Zones',
 };
 
 function useClock(): string {
@@ -55,6 +61,29 @@ function useClock(): string {
     return () => window.clearInterval(id);
   }, []);
   return now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+// Geofence tab owns its own live positions feed so GeofenceManager can
+// stay a pure zone editor wherever it is mounted.
+function GeofenceTab() {
+  const [positions, setPositions] = useState<PersonPosition[]>([]);
+  const load = useCallback(async () => {
+    try {
+      setPositions(await getPositions());
+    } catch {
+      // The manager still renders zones without live positions.
+    }
+  }, []);
+  useEffect(() => {
+    void load();
+    const id = window.setInterval(load, 5000);
+    return () => window.clearInterval(id);
+  }, [load]);
+  return (
+    <div className="rise">
+      <GeofenceManager positions={positions} />
+    </div>
+  );
 }
 
 export default function App() {
@@ -193,6 +222,13 @@ export default function App() {
           {tab === 'analytics' && <AnalyticsTab />}
           {tab === 'roommap' && <RoomMapTab />}
           {tab === 'personal' && <WellnessDashboard />}
+          {tab === 'identity' && (
+            <div className="grid-2 rise">
+              <UnknownPeoplePanel />
+              <KnownPeopleList />
+            </div>
+          )}
+          {tab === 'geofence' && <GeofenceTab />}
         </div>
 
         <footer className="footer-note">

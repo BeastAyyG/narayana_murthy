@@ -18,6 +18,7 @@
 
   /* ink */
   --ink: #0b0c0d;
+  --text-1: #0b0c0d;
   --ink-2: #151618;
   --ink-3: #212325;
   --text-2: #6b6b6b;
@@ -472,6 +473,18 @@ button, input, select, textarea { font: inherit; color: inherit; }
   border-radius: 12px;
   -webkit-overflow-scrolling: touch;
   background: var(--surface);
+}
+
+/* Scrolling ledger: the header stays put while rows scroll underneath. */
+.table-wrap-scroll {
+  max-height: 72vh;
+  overflow-y: auto;
+}
+.table-wrap-scroll .ledger thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  box-shadow: 0 1px 0 var(--rule);
 }
 
 table.ledger {
