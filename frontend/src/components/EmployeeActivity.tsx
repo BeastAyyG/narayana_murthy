@@ -71,6 +71,7 @@ export default function EmployeeActivity({ officeId = "" }: { officeId?: string 
   const [records, setRecords] = useState<ActivityRecord[]>([]);
   const [strain, setStrain] = useState<StrainSummary[]>([]);
   const [appUsage, setAppUsage] = useState<AppUsageItem[]>([]);
+  const [focusScores, setFocusScores] = useState<Record<string, number | null>>({});
   const [employeeId, setEmployeeId] = useState("");
   const [machineId, setMachineId] = useState("");
   const [appUsageDay, setAppUsageDay] = useState(() => new Date().toISOString().slice(0, 10));
@@ -97,9 +98,30 @@ export default function EmployeeActivity({ officeId = "" }: { officeId?: string 
       if (!actRes.ok) throw new Error(`activity: HTTP ${actRes.status}`);
       if (!strainRes.ok) throw new Error(`strain-summary: HTTP ${strainRes.status}`);
       if (!usageRes.ok) throw new Error(`app-usage: HTTP ${usageRes.status}`);
+      const strainData: StrainSummary[] = await strainRes.json();
       setRecords(await actRes.json());
-      setStrain(await strainRes.json());
+      setStrain(strainData);
       setAppUsage(await usageRes.json());
+      // Today's focus score per employee, so the strain list also answers
+      // "how focused was this person". A failed lookup renders "-" and
+      // never blocks the activity data above.
+      const ids = [...new Set(strainData.map((s) => s.employee_id).filter(Boolean))];
+      const focusEntries = await Promise.all(
+        ids.map(async (id) => {
+          try {
+            const officeParam = officeId ? `&office_id=${encodeURIComponent(officeId)}` : "";
+            const r = await fetch(
+              `${API_URL}/focus/daily?employee_id=${encodeURIComponent(id)}${officeParam}`
+            );
+            if (!r.ok) return [id, null] as const;
+            const d = (await r.json()) as { focus_score?: number };
+            return [id, typeof d.focus_score === "number" ? d.focus_score : null] as const;
+          } catch {
+            return [id, null] as const;
+          }
+        })
+      );
+      setFocusScores(Object.fromEntries(focusEntries));
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to load activity data");
     } finally {
@@ -192,8 +214,11 @@ export default function EmployeeActivity({ officeId = "" }: { officeId?: string 
         </div>
         <p style={{ color: "var(--text-2)", fontSize: 13, margin: "14px 0 0", maxWidth: "80ch" }}>
           Strain level is a heuristic workload signal (green &lt; 40, amber 40-69, red &ge; 70).
-          It is not a medical measure. ML stress is an experimental model score shown when the
-          backend provides it.
+          It is not a medical measure. Focus score is 0-100: it starts at 100 and rewards
+          25-minute deep-work blocks, then subtracts points for frequent app switching,
+          fragmented short segments and idle time. ML stress is an experimental model score
+          shown when the backend provides it. Only counts are collected here, never what
+          was typed: no keystroke content is stored or shown anywhere in this interface.
         </p>
       </section>
 
@@ -224,13 +249,20 @@ export default function EmployeeActivity({ officeId = "" }: { officeId?: string 
             <ul className="spec-list">
               {strain.map((s, i) => {
                 const color = STRAIN_COLORS[(s.strain_level || "unknown").toLowerCase()] ?? "var(--text-3)";
+                const focus = focusScores[s.employee_id] ?? null;
                 return (
                   <li key={`${s.machine_id}/${s.employee_id}`} className="rise-stagger" style={{ "--i": Math.min(i, 12) } as React.CSSProperties}>
                     <span className="spec-term" style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <Dot tone={strainDot(s.strain_level)} />
-                      <span className="id" style={{ fontFamily: "var(--font-mono)", fontSize: 12.5 }}>
+                      <button
+                        type="button"
+                        className="id"
+                        style={{ fontFamily: "var(--font-mono)", fontSize: 12.5, background: "none", border: 0, padding: 0, cursor: "pointer", color: "var(--ice)", textDecoration: "underline" }}
+                        onClick={() => setEmployeeId(s.employee_id)}
+                        title={`Show only ${s.employee_id} in the timeline below`}
+                      >
                         {s.employee_id}@{s.machine_id}
-                      </span>
+                      </button>
                     </span>
                     <span style={{ flex: 1, minWidth: 140 }}>
                       <Meter value={s.strain_score ?? 0} color={color} label={`Strain ${s.strain_score ?? "unknown"}`} />
@@ -238,6 +270,9 @@ export default function EmployeeActivity({ officeId = "" }: { officeId?: string 
                     <span className="num" style={{ fontFamily: "var(--font-mono)", fontSize: 12.5, whiteSpace: "nowrap" }}>
                       {s.strain_score ?? "-"} / {s.strain_level}
                     </span>
+                    <Chip tone={focus === null ? "idle" : focus >= 70 ? "ok" : focus >= 40 ? "warn" : "bad"}>
+                      Focus {focus ?? "-"}
+                    </Chip>
                     <Chip tone="iris">ML {s.ml_stress_score ?? "-"}</Chip>
                   </li>
                 );
@@ -279,11 +314,15 @@ export default function EmployeeActivity({ officeId = "" }: { officeId?: string 
 
         <Reveal>
           <section className="panel" aria-label="Idle stats">
-            <SectionHead title="Time Split" />
+            <SectionHead title="Time Split" meta={`from ${activityRows.length} activity segments`} />
             <div className="grid-2">
               <Stat label="Active" value={`${idleStats.activeMin.toFixed(0)} min`} mono />
               <Stat label="Idle" value={`${idleStats.idleMin.toFixed(0)} min`} mono tone="var(--text-2)" />
             </div>
+            <p style={{ color: "var(--text-2)", fontSize: 13, margin: "12px 0 0" }}>
+              Active and idle minutes are summed from the start and end times of the activity
+              segments in the timeline below.
+            </p>
             {alerts.length > 0 && (
               <>
                 <hr className="divider" />

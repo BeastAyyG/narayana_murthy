@@ -67,6 +67,49 @@ function scoreColor(score: number): string {
   return 'var(--bad)';
 }
 
+/** Quiet break reminder toast. Never a modal and never blocking: a small
+ *  card in the corner, dismissible, announced politely. Driven only by the
+ *  break compliance already returned with the daily focus score. There is
+ *  no separate break-reminder endpoint. */
+function BreakToast({ taken, required, onDismiss }: { taken: number; required: number; onDismiss: () => void }) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      style={{
+        position: 'fixed',
+        right: 18,
+        bottom: 18,
+        zIndex: 60,
+        maxWidth: 340,
+        background: 'var(--paper)',
+        border: '1px solid var(--rule)',
+        borderRadius: 10,
+        padding: '12px 14px',
+        boxShadow: '0 8px 28px rgba(11, 12, 13, 0.14)',
+        fontSize: 13,
+        color: 'var(--ink)',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+        <p style={{ margin: 0, flex: 1 }}>
+          <strong>Break reminder.</strong> You have taken {taken} of {required} breaks today.
+          A short break helps the next deep-work block.
+        </p>
+        <button
+          type="button"
+          className="btn"
+          onClick={onDismiss}
+          aria-label="Dismiss break reminder"
+          style={{ padding: '2px 8px', flex: 'none' }}
+        >
+          Dismiss
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /** 7-day bar chart. Bars grow in on mount (scaleY from the baseline). */
 function WeekBars({ trend }: { trend: Array<{ date: string; score: number | null }> }) {
   const W = 560;
@@ -158,6 +201,9 @@ export default function FocusWidget({ officeId = "" }: { officeId?: string }) {
   const [trend, setTrend] = useState<Array<{ date: string; score: number | null }>>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Key of the break toast already dismissed, "employee/date". A new day or
+  // employee gets a fresh toast; dismissing never blocks anything.
+  const [toastDismissedFor, setToastDismissedFor] = useState<string | null>(null);
 
   const loadEmployees = useCallback(async () => {
     try {
@@ -251,6 +297,9 @@ export default function FocusWidget({ officeId = "" }: { officeId?: string }) {
   }, [daily]);
 
   const score = daily?.focus_score ?? 0;
+  const toastKey = daily ? `${daily.employee_id}/${daily.date}` : null;
+  const showBreakToast =
+    daily !== null && !daily.break_compliance.compliant && toastDismissedFor !== toastKey;
 
   return (
     <div className="rise">
@@ -321,6 +370,11 @@ export default function FocusWidget({ officeId = "" }: { officeId?: string }) {
                 </div>
               </div>
               <hr className="divider" />
+              <p style={{ color: 'var(--text-2)', fontSize: 13, margin: '0 0 14px', maxWidth: '80ch' }}>
+                100 means a day of uninterrupted deep work. Switching apps, short fragmented
+                segments and idle time pull the score down. Every input is listed in Score
+                Breakdown below, so the number is never a mystery.
+              </p>
               <div className="grid-4">
                 <Stat label="Focus streak" value={`${streaks?.focus_streak_days ?? 0}d`} mono />
                 <Stat label="Break streak" value={`${streaks?.break_streak_days ?? 0}d`} mono />
@@ -363,6 +417,11 @@ export default function FocusWidget({ officeId = "" }: { officeId?: string }) {
                     </tbody>
                   </table>
                 </div>
+                <p style={{ color: 'var(--text-2)', fontSize: 13, margin: '12px 0 0' }}>
+                  Formula: start at 100, +2 per 25-min deep-work block (capped at 10), -1 per app
+                  switch beyond 8/hour free, -2 per short segment beyond 6 free, minus a share
+                  of idle time. Refreshes every 60 seconds.
+                </p>
               </section>
             </Reveal>
             <Reveal>
@@ -373,12 +432,15 @@ export default function FocusWidget({ officeId = "" }: { officeId?: string }) {
             </Reveal>
           </div>
 
-          <p style={{ color: 'var(--text-2)', fontSize: 13, maxWidth: "80ch" }}>
-            Formula: start at 100, +2 per 25-min deep-work block (capped at 10), -1 per app
-            switch beyond 8/hour free, -2 per short segment beyond 6 free, minus a share
-            of idle time. Refreshes every 60 seconds.
-          </p>
         </>
+      )}
+
+      {showBreakToast && daily && toastKey && (
+        <BreakToast
+          taken={daily.break_compliance.taken_breaks}
+          required={daily.break_compliance.required_breaks}
+          onDismiss={() => setToastDismissedFor(toastKey)}
+        />
       )}
     </div>
   );
