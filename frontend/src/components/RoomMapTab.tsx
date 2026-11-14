@@ -1,16 +1,30 @@
 // Room Map tab: live 2D floor plan of tracked persons, a heatmap overlay,
 // and an occupancy timeline. All data comes from the new tracking endpoints.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { getHeatmap, getOccupancy, getPositions } from '../api';
-import type { HeatPoint, OccupancyBucket, PersonPosition } from '../types';
-import { KnownPeopleList, UnknownPeoplePanel } from './IdentityPanels';
+import { fetchEvents, getGeofences, getHeatmap, getOccupancy, getPositions } from '../api';
+import type { DetectionEvent, GeofenceZone, HeatPoint, OccupancyBucket, PersonPosition } from '../types';
 import { EmptyState, ErrorNotice, SectionHead, SkeletonCards, Stat } from './ui';
-import GeofenceManager from './GeofenceManager';
 
 const POLL_MS = 2000;
 const OCCUPANCY_REFRESH_MS = 60000;
+const ZONE_REFRESH_MS = 30000;
+const EVENT_REFRESH_MS = 10000;
 const MAP_W = 1000;
 const MAP_H = 620;
+
+// Zone colour rule, shared with GeofenceManager so the same zone has the
+// same colour on both maps: sort zones by id, then alternate ice and iris.
+export function zoneColor(index: number): string {
+  return index % 2 === 0 ? 'var(--ice)' : 'var(--iris)';
+}
+
+function sortedZones(zones: GeofenceZone[]): GeofenceZone[] {
+  return [...zones].sort((a, b) => a.id - b.id);
+}
+
+function zonePointString(point: [number, number]): string {
+  return `${clamp01(point[0]) * MAP_W},${clamp01(point[1]) * MAP_H}`;
+}
 
 // Position coordinates arrive normalized to [0, 1]; clamp defensively.
 function clamp01(v: number): number {
@@ -142,6 +156,9 @@ export default function RoomMapTab() {
   const [positions, setPositions] = useState<PersonPosition[]>([]);
   const [heat, setHeat] = useState<HeatPoint[]>([]);
   const [occupancy, setOccupancy] = useState<OccupancyBucket[]>([]);
+  const [zones, setZones] = useState<GeofenceZone[]>([]);
+  const [recentEvents, setRecentEvents] = useState<DetectionEvent[]>([]);
+  const [eventsLoaded, setEventsLoaded] = useState(false);
   const [heatmapOn, setHeatmapOn] = useState(false);
   const [heatCamera, setHeatCamera] = useState('');
   const [loading, setLoading] = useState(true);
@@ -177,16 +194,42 @@ export default function RoomMapTab() {
     }
   }, [heatmapOn, heatCamera]);
 
+  const loadZones = useCallback(async () => {
+    try {
+      setZones(sortedZones(await getGeofences()));
+    } catch {
+      // Zones are secondary; the map keeps working without them.
+    }
+  }, []);
+
+  // Recent events name cameras that reported detections lately. A camera
+  // in that set with no live positions right now is shown as offline.
+  const loadRecentEvents = useCallback(async () => {
+    try {
+      setRecentEvents(await fetchEvents(undefined, 100));
+    } catch {
+      setRecentEvents([]);
+    } finally {
+      setEventsLoaded(true);
+    }
+  }, []);
+
   useEffect(() => {
     void loadPositions();
     void loadOccupancy();
+    void loadZones();
+    void loadRecentEvents();
     const pos = window.setInterval(() => { void loadPositions(); }, POLL_MS);
     const occ = window.setInterval(() => { void loadOccupancy(); }, OCCUPANCY_REFRESH_MS);
+    const zn = window.setInterval(() => { void loadZones(); }, ZONE_REFRESH_MS);
+    const ev = window.setInterval(() => { void loadRecentEvents(); }, EVENT_REFRESH_MS);
     return () => {
       window.clearInterval(pos);
       window.clearInterval(occ);
+      window.clearInterval(zn);
+      window.clearInterval(ev);
     };
-  }, [loadPositions, loadOccupancy]);
+  }, [loadPositions, loadOccupancy, loadZones, loadRecentEvents]);
 
   useEffect(() => {
     void loadHeat();
@@ -200,6 +243,19 @@ export default function RoomMapTab() {
 
   const knownCount = positions.filter((p) => isKnownName(p.person_name)).length;
   const maxWeight = Math.max(1, ...heat.map((h) => h.weight));
+
+  // Cameras that reported events recently but have no live positions now.
+  // When there are no recent events at all, nothing is claimed about
+  // offline cameras.
+  const offlineCameras = useMemo(() => {
+    if (!eventsLoaded || recentEvents.length === 0) return [];
+    const live = new Set(positions.map((p) => p.camera_id));
+    const seen = new Set<string>();
+    for (const e of recentEvents) {
+      if (e.camera_id && !live.has(e.camera_id)) seen.add(e.camera_id);
+    }
+    return [...seen].sort();
+  }, [eventsLoaded, recentEvents, positions]);
 
   const markerTransition = reducedMotion ? 'none' : 'cx 0.6s ease, cy 0.6s ease';
 
@@ -312,6 +368,32 @@ export default function RoomMapTab() {
                 CAMERA PLAN VIEW
               </text>
 
+              {/* geofence zones, same data and colours as the Geofence tab */}
+              {zones.map((zone, index) => (
+                <g key={zone.id}>
+                  <polygon
+                    points={zone.polygon.map(zonePointString).join(' ')}
+                    fill={zoneColor(index)}
+                    fillOpacity="0.10"
+                    stroke={zoneColor(index)}
+                    strokeWidth="2"
+                    strokeLinejoin="round"
+                  />
+                  {zone.polygon[0] && (
+                    <text
+                      x={clamp01(zone.polygon[0][0]) * MAP_W + 8}
+                      y={clamp01(zone.polygon[0][1]) * MAP_H - 8}
+                      fontSize="13"
+                      fill="var(--text-1)"
+                      fontWeight="600"
+                      fontFamily="var(--font-display)"
+                    >
+                      {zone.name}
+                    </text>
+                  )}
+                </g>
+              ))}
+
               {/* heatmap density layer */}
               {heatmapOn &&
                 heat.map((h, i) => {
@@ -401,15 +483,24 @@ export default function RoomMapTab() {
                   Dwell density
                 </span>
               )}
+              {zones.length > 0 && (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ width: 14, height: 10, border: '2px solid var(--ice)', background: 'var(--ice)', opacity: 0.16, display: 'inline-block', borderRadius: 2 }} />
+                  Geofence zone
+                </span>
+              )}
               <span style={{ marginLeft: 'auto' }}>
                 Positions are normalized room coordinates reported by the vision pipeline.
               </span>
             </figcaption>
           </figure>
         )}
+        {offlineCameras.length > 0 && (
+          <p style={{ color: 'var(--text-2)', fontSize: 13, margin: '12px 0 0' }} role="status">
+            Offline: {offlineCameras.join(', ')} reported events recently but have no live positions.
+          </p>
+        )}
       </section>
-
-      <GeofenceManager positions={positions} />
 
       <section className="panel" aria-label="Occupancy timeline" style={{ marginTop: 20 }}>
         <SectionHead title="Occupancy Timeline" meta="last 24h, 15m buckets" />
@@ -422,11 +513,6 @@ export default function RoomMapTab() {
           <OccupancyChart buckets={occupancy} />
         )}
       </section>
-
-      <div className="grid-2" style={{ marginTop: 20 }}>
-        <UnknownPeoplePanel />
-        <KnownPeopleList />
-      </div>
     </div>
   );
 }
