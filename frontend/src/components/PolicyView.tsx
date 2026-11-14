@@ -211,9 +211,65 @@ export default function PolicyView() {
       </Reveal>
 
       <Reveal>
+        <section className="panel" aria-label="What is collected">
+          <SectionHead title="What is collected, and what is not" />
+          <ul className="spec-list">
+            <li>
+              <span className="spec-term">Collected</span>
+              <span className="spec-def">
+                Input counts (how much typing and mouse activity, not what was typed),
+                active and idle time, app names in use, and camera sightings with a
+                confidence value. Security signals are device labels and byte counts only.
+              </span>
+            </li>
+            <li>
+              <span className="spec-term">Never collected</span>
+              <span className="spec-def">
+                Keystroke content is never captured, file content is never captured, and
+                no audio is recorded. Excluded apps and title patterns below are never logged.
+              </span>
+            </li>
+            <li>
+              <span className="spec-term">Consent</span>
+              <span className="spec-def">
+                First-run consent is required on the workstation before any logging starts.
+                Optional wellness data needs a separate consent, given in the Wellness tab,
+                and manager check-ins need a second separate opt-in on top of that.
+              </span>
+            </li>
+            <li>
+              <span className="spec-term">Retention</span>
+              <span className="spec-def">
+                Logs are kept for {rulesData?.retention_days ?? 90} days, then deleted
+                automatically. See Data Retention under Privacy Controls below.
+              </span>
+            </li>
+          </ul>
+        </section>
+      </Reveal>
+
+      <Reveal>
         <section className="panel" aria-label="Privacy Controls">
           <SectionHead title="Privacy Controls" />
+          <div className="notice notice-info" role="note" style={{ marginBottom: 14 }}>
+            <p>
+              <strong>Privacy mode rule: when privacy mode is on, only aggregate occupancy
+              is counted and face recognition is OFF.</strong> No names are attached to
+              sightings, no face recognition runs, and no gallery sync happens while it
+              is on. This page has no live privacy-mode feed from the backend, so it
+              cannot show whether privacy mode is on right now. A live status needs a
+              backend endpoint that reports the current privacy mode; until that exists,
+              treat this as the rule, not a live reading.
+            </p>
+          </div>
           <ul className="spec-list">
+            <li>
+              <span className="spec-term">Face recognition</span>
+              <span className="spec-def">
+                OFF whenever privacy mode is on. In normal operation it runs only on
+                cameras with per-camera consent, and only for people with active consent.
+              </span>
+            </li>
             <li>
               <span className="spec-term">Excluded Applications</span>
               <span className="spec-def">

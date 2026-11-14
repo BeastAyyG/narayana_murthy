@@ -281,7 +281,7 @@ export default function WellnessDashboard() {
           <div><p className="page-kicker">Private to you · {data.employee_id}</p><h2 className="section-title">Your personal view</h2></div>
           <div className="form-row"><button className="btn" type="button" onClick={() => { void refresh(); void refreshGeofenceEvents(); void refreshAttendance(); }} disabled={loading}>Refresh</button><button className="btn" type="button" onClick={disconnect}>Disconnect</button></div>
         </div>
-        <p className="wellness-privacy-note">Only aggregates for your own token are returned. The token is held in page memory, never local storage. Trend cards are self-coaching hints, not a diagnosis, medical advice, or performance rating. Managers never see raw health values or trend details; only a separate opt-in can enable a fixed supportive prompt and your employee ID for an authorized roster.</p>
+        <p className="wellness-privacy-note">Only aggregates for your own token are returned. The token is held in page memory, never local storage. Trend notes are self-coaching hints, not a diagnosis, medical advice, or performance rating. Managers never see raw health values or trend details; only a separate opt-in can enable a fixed supportive prompt and your employee ID for an authorized roster.</p>
         {notice && <p className="notice notice-ok" role="status">{notice}</p>}
         {error && <p className="notice notice-error" role="alert">{error}</p>}
       </section>
@@ -366,11 +366,11 @@ export default function WellnessDashboard() {
           <section className="wellness-hrv-chart" aria-label="Personal RMSSD trend chart">
             <h3 className="section-title">Your RMSSD trend</h3>
             <p className="wellness-privacy-note">Daily values are shown with their recorded source. Overnight/resting provenance is source-reported and is not inferred; manual/unknown and short-window readings remain distinct.</p>
-            {dailyRows.filter((d) => d.rmssd_ms !== null).length < 2 ? <p>At least two RMSSD readings are needed to draw a trend.</p> : <div className="wellness-chart-scroll"><svg role="img" aria-label="Daily RMSSD readings in milliseconds; labels identify each reading source" aria-describedby="wellness-rmssd-flag" viewBox={`0 0 640 220`} className="wellness-chart">
+            {dailyRows.filter((d) => d.rmssd_ms !== null).length < 2 ? <p>At least two RMSSD readings are needed to draw a trend.</p> : <div className="wellness-chart-scroll"><svg role="img" aria-label="Daily RMSSD readings in milliseconds; labels identify each reading source" aria-describedby="wellness-rmssd-note" viewBox={`0 0 640 220`} className="wellness-chart">
               {(() => { const points = dailyRows.filter((d) => d.rmssd_ms !== null).slice(-14); const vals = points.map((d) => d.rmssd_ms as number); const lo = Math.min(...vals), hi = Math.max(...vals); const y = (v: number) => 165 - (hi === lo ? 0.5 : (v-lo)/(hi-lo))*125; const x = (i: number) => 42 + i * (556 / Math.max(1, points.length-1)); return <>{[0,1,2,3].map(i => <line key={i} x1="38" x2="610" y1={40+i*42} y2={40+i*42} className="wellness-chart-grid"/>)}<polyline points={points.map((d,i)=>`${x(i)},${y(d.rmssd_ms as number)}`).join(' ')} className="wellness-chart-line" fill="none"/>{points.map((d,i)=><g key={d.day}><circle cx={x(i)} cy={y(d.rmssd_ms as number)} r="4" className="wellness-chart-point"><title>{`${d.day}: ${d.rmssd_ms} ms · ${sourceLabel[d.rmssd_source ?? 'manual']}`}</title></circle><text x={x(i)} y="190" textAnchor="middle" className="wellness-chart-label">{d.day.slice(5)}</text></g>)}</>; })()}
             </svg></div>}
-            {data.wellness.hrv_trend && <p id="wellness-rmssd-flag" className={`notice${data.wellness.hrv_trend.flag ? ' notice-warn' : ''}`} role="note">
-              <strong>{data.wellness.hrv_trend.flag ? 'Sustained decline flag:' : data.wellness.hrv_trend.available ? 'No sustained decline flag:' : 'No flag yet:'}</strong>{' '}
+            {data.wellness.hrv_trend && <p id="wellness-rmssd-note" className="notice" role="note">
+              <strong>{data.wellness.hrv_trend.flag ? "Sustained lower pattern:" : data.wellness.hrv_trend.available ? "No sustained lower pattern:" : "Not enough readings yet:"}</strong>{" "}
               {data.wellness.hrv_trend.available
                 ? `${data.wellness.hrv_trend.decline_percent ?? 0}% decline across adjacent weekly medians.`
                 : 'Not enough repeated readings to compare adjacent weeks.'}{' '}
@@ -387,7 +387,7 @@ export default function WellnessDashboard() {
           <div className="table-wrap"><table className="ledger"><thead><tr><th>Session ended</th><th>Duration (minutes)</th><th>Source</th></tr></thead><tbody>{data.wellness.sleep_sessions.slice(-7).reverse().map((session) => <tr key={`${session.started_at}-${session.ended_at}`}><td>{new Date(session.ended_at).toLocaleString()}</td><td>{session.duration_minutes}</td><td>{session.source}</td></tr>)}</tbody></table></div>
           {data.wellness.break_prompt?.show_prompt && (
             <div className="notice notice-warn">
-              <strong>Consider a short pause.</strong> A recent work-pattern and personal HRV signal aligned; this is a private, non-medical nudge.
+              <strong>A short pause may feel good right now.</strong> This is a private, optional suggestion based on your recent patterns, not a medical recommendation.
               <div className="form-row">
                 <button className="btn" type="button" onClick={() => void mutate('/wellness/breaks', { event_type: 'suggested' }, 'Prompt noted in your private daily summary.')}>Note prompt</button>
                 <button className="btn" type="button" onClick={() => void mutate('/wellness/breaks', { event_type: 'taken' }, 'Break noted in your private daily summary.')}>I took a break</button>
@@ -421,11 +421,11 @@ export default function WellnessDashboard() {
       </section>
 
       <section className="panel">
-        <div className="section-head"><h2 className="section-title">Private trend checks</h2><span className="section-meta">No manager access · retention {data.data_retention_days} days</span></div>
-        <p className="wellness-privacy-note">The activity-only advisory uses recorded active minutes already collected under your workstation consent; it does not need optional health consent. It is shown only in your token-authenticated view. Task-count comparisons are retrospective. Neither is a performance rating, validated forecast, or explanation of cause.</p>
-        {data.predictions.length === 0 ? <p>No current hint. The active-time advisory needs at least four active days in each of three completed 7-day windows, plus a 10% week-over-week decline and a 20% drop below the prior-two-week average. A separate task-count comparison needs repeated self-reports.</p> : data.predictions.map((p) => <article className="wellness-prediction" key={p.key}>
+        <div className="section-head"><h2 className="section-title">Private trend notes</h2><span className="section-meta">No manager access · retention {data.data_retention_days} days</span></div>
+        <p className="wellness-privacy-note">The activity-only note uses recorded active minutes already collected under your workstation consent; it does not need optional health consent. It is shown only in your token-authenticated view. Task-count comparisons are retrospective. Neither is a performance rating, a validated forecast, or an explanation of cause.</p>
+        {data.predictions.length === 0 ? <p>No current notes. The active-time note needs at least four active days in each of three completed 7-day windows, plus a 10% week-over-week decline and a 20% drop below the prior-two-week average. A separate task-count comparison needs repeated self-reports.</p> : data.predictions.map((p) => <article className="wellness-prediction" key={p.key}>
           <h3>{p.title}</h3><p>{p.reason}</p><p><strong>Possible next step:</strong> {p.next_step}</p>
-          <div className="form-row"><button className="btn" type="button" onClick={() => void mutate('/wellness/prediction-feedback', { prediction_key: p.key, false_positive: true }, 'Thanks - this hint was marked as a false positive.')}>This was a false positive</button><button className="btn" type="button" onClick={() => void mutate('/wellness/prediction-feedback', { prediction_key: p.key, false_positive: false }, 'Feedback saved.')}>Useful / not a false positive</button>{p.false_positive === true && <span className="section-meta">Marked false positive</span>}{p.false_positive === false && <span className="section-meta">Recorded as useful</span>}</div>
+          <div className="form-row"><button className="btn" type="button" onClick={() => void mutate('/wellness/prediction-feedback', { prediction_key: p.key, false_positive: true }, 'Thanks - this note was marked as a false positive.')}>This was a false positive</button><button className="btn" type="button" onClick={() => void mutate('/wellness/prediction-feedback', { prediction_key: p.key, false_positive: false }, 'Feedback saved.')}>Useful / not a false positive</button>{p.false_positive === true && <span className="section-meta">Marked false positive</span>}{p.false_positive === false && <span className="section-meta">Recorded as useful</span>}</div>
         </article>)}
       </section>
     </div>
