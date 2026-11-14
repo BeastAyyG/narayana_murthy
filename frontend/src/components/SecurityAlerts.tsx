@@ -44,22 +44,16 @@ function severityLabel(severity: string): string {
   return "Low severity";
 }
 
-// In-file part of the source-event link (brief principle 3: every number
-// traces to its underlying event). The alert id IS the underlying security
-// event row id: backend flag_anomalies passes the stored event id through
-// unchanged, and GET /security/alerts returns it as AlertOut.id. There is
-// no camera on a workstation security event, so no camera is shown and
-// none is invented. Cross-tab navigation to the Vision Events tab needs
-// App-level tab state, which lives outside this component: this button
-// dispatches a wamss:show-event CustomEvent carrying the source event id,
-// and the App shell must listen for it and open the Vision Events tab.
-// Until that wiring lands, the source event id below is the traceable link.
-function requestSourceEvent(eventId: number | null) {
-  if (eventId === null) return;
-  window.dispatchEvent(
-    new CustomEvent("wamss:show-event", { detail: { eventId } }),
-  );
-}
+// Brief principle 3: every number traces to its underlying event. The
+// alert id IS the underlying security event row id: backend flag_anomalies
+// passes the stored event id through unchanged, and GET /security/alerts
+// returns it as AlertOut.id. There is no camera on a workstation security
+// event, so no camera is shown and none is invented. There is no
+// security-event detail endpoint and no shared id space with the Vision
+// Events ledger (different tables), so the id itself is the traceable
+// link; a clickable detail view needs backend work first. A button that
+// pretended to open the event in the ledger would land on the wrong
+// event, so there is deliberately no such button here.
 
 function formatDetail(detail: Record<string, unknown> | null): string {
   if (!detail) return "";
@@ -187,18 +181,8 @@ export default function SecurityAlerts({ officeId = "" }: { officeId?: string })
                       {formatDetail(a.detail) ? ` · ${formatDetail(a.detail)}` : ""}
                     </p>
                     <p className="alert-row-meta">
-                      Camera: not recorded for workstation events.{" "}
-                      {a.id === null ? (
-                        <span>No source event was recorded for this alert.</span>
-                      ) : (
-                        <button
-                          type="button"
-                          className="btn"
-                          onClick={() => requestSourceEvent(a.id)}
-                        >
-                          View source event {a.id}
-                        </button>
-                      )}
+                      Camera: not recorded for workstation events.
+                      {a.id === null && " No source event was recorded for this alert."}
                     </p>
                   </div>
                 </li>
@@ -211,8 +195,8 @@ export default function SecurityAlerts({ officeId = "" }: { officeId?: string })
             WAMSS_WORK_HOURS), and file write bursts above WAMSS_DLP_WRITE_THRESHOLD_MB
             per interval. Workstation agents report byte counts only; no file or keystroke
             content is ever captured. Each alert shows its source security event id above.
-            Opening that event in the Vision Events tab needs App-level wiring for the
-            wamss:show-event signal; until then the id is the traceable link.
+            Opening the full security event record needs a backend detail endpoint,
+            which does not exist yet.
           </p>
         </section>
       </Reveal>
