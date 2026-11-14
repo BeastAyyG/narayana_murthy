@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type MouseEvent } from 'reac
 import { createGeofence, deleteGeofence, getGeofences } from '../api';
 import type { GeofencePoint, GeofenceZone, PersonPosition } from '../types';
 import { EmptyState, ErrorNotice, SectionHead } from './ui';
+import { zoneColor } from './RoomMapTab';
 
 const MAP_W = 1000;
 const MAP_H = 620;
@@ -49,7 +50,10 @@ export default function GeofenceManager({ positions }: { positions: PersonPositi
 
   const loadZones = useCallback(async () => {
     try {
-      setZones(await getGeofences());
+      const data = await getGeofences();
+      // Sort by id so zone colours are stable and match the Room Map,
+      // which colours zones by index in the same id-sorted order.
+      setZones([...data].sort((a, b) => a.id - b.id));
       setZoneError(null);
     } catch (error) {
       setZoneError(error instanceof Error ? error.message : 'Could not load geofence zones');
@@ -218,23 +222,28 @@ export default function GeofenceManager({ positions }: { positions: PersonPositi
             {selectedCamera ? `CAMERA ${selectedCamera}` : 'SELECT A CAMERA'}
           </text>
 
-          {selectedZones.map((zone, index) => (
-            <g key={zone.id}>
-              <polygon
-                points={zone.polygon.map(pointString).join(' ')}
-                fill={index % 2 === 0 ? 'var(--ice)' : 'var(--iris)'}
-                fillOpacity="0.16"
-                stroke={index % 2 === 0 ? 'var(--ice)' : 'var(--iris)'}
-                strokeWidth="3"
-                strokeLinejoin="round"
-              />
-              {zone.polygon[0] && (
-                <text x={clamp01(zone.polygon[0][0]) * MAP_W + 8} y={clamp01(zone.polygon[0][1]) * MAP_H - 8} fontSize="14" fill="var(--text-1)" fontWeight="600">
-                  {zone.name}
-                </text>
-              )}
-            </g>
-          ))}
+          {selectedZones.map((zone) => {
+            // Colour by index in the full id-sorted zone list, so the same
+            // zone has the same colour here as on the Room Map.
+            const color = zoneColor(zones.findIndex((z) => z.id === zone.id));
+            return (
+              <g key={zone.id}>
+                <polygon
+                  points={zone.polygon.map(pointString).join(' ')}
+                  fill={color}
+                  fillOpacity="0.16"
+                  stroke={color}
+                  strokeWidth="3"
+                  strokeLinejoin="round"
+                />
+                {zone.polygon[0] && (
+                  <text x={clamp01(zone.polygon[0][0]) * MAP_W + 8} y={clamp01(zone.polygon[0][1]) * MAP_H - 8} fontSize="14" fill="var(--text-1)" fontWeight="600">
+                    {zone.name}
+                  </text>
+                )}
+              </g>
+            );
+          })}
 
           {drawing && draftPoints.length > 0 && (
             <g>
@@ -280,21 +289,25 @@ export default function GeofenceManager({ positions }: { positions: PersonPositi
             <EmptyState title="No zones for this camera" body="Draw and save a polygon to start receiving entry and exit alerts." />
           ) : (
             <div style={{ display: 'grid', gap: 8 }}>
-              {selectedZones.map((zone) => (
-                <div key={zone.id} style={{ display: 'flex', alignItems: 'center', gap: 10, borderBottom: '1px solid var(--rule)', padding: '8px 0' }}>
-                  <span style={{ flex: 1 }}>{zone.name}</span>
-                  <span className="section-meta">{zone.polygon.length} points</span>
-                  <button type="button" className="btn" onClick={() => { void removeZone(zone.id); }} aria-label={`Delete ${zone.name} geofence`}>
-                    Delete
-                  </button>
-                </div>
-              ))}
+              {selectedZones.map((zone) => {
+                const color = zoneColor(zones.findIndex((z) => z.id === zone.id));
+                return (
+                  <div key={zone.id} style={{ display: 'flex', alignItems: 'center', gap: 10, borderBottom: '1px solid var(--rule)', padding: '8px 0' }}>
+                    <span style={{ width: 12, height: 12, borderRadius: 2, background: color, opacity: 0.85, flex: 'none' }} aria-hidden="true" />
+                    <span style={{ flex: 1 }}>{zone.name}</span>
+                    <span className="section-meta">{zone.polygon.length} points</span>
+                    <button type="button" className="btn" onClick={() => { void removeZone(zone.id); }} aria-label={`Delete ${zone.name} geofence`}>
+                      Delete
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
         <div>
-          <SectionHead title="Personal history" meta="employee-only" />
-          <p className="section-meta">Geofence transitions are available only in an employee's token-authenticated personal view. This management page does not request or display person-level history.</p>
+          <SectionHead title="Entry and exit alerts" meta="employee-only" />
+          <p className="section-meta">Entry and exit alerts are not shown here. The only backend endpoint that lists geofence transitions, GET /geofence-events, requires an employee token the console does not hold, so this page cannot fetch them and shows no invented history. Geofence transitions remain available only in an employee&apos;s token-authenticated personal view.</p>
         </div>
       </div>
 

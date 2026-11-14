@@ -4,7 +4,7 @@
 // separately from this UI, so a 404 resolves to an empty list and the
 // panels render a graceful empty state instead of an error.
 import { useCallback, useEffect, useState } from 'react';
-import { deleteIdentity, enrollFace, getIdentities, getUnknowns, snapshotUrl } from '../api';
+import { deleteIdentity, enrollFace, fetchEvents, getIdentities, getUnknowns, snapshotUrl } from '../api';
 import type { Identity, UnknownSighting } from '../types';
 import { Chip, EmptyState, ErrorNotice, SectionHead, SkeletonRows, formatClock } from './ui';
 
@@ -181,6 +181,7 @@ export function UnknownPeoplePanel() {
                         placeholder="Type a name"
                         value={names[key] ?? ''}
                         onChange={(e) => setNames((prev) => ({ ...prev, [key]: e.target.value }))}
+                        onKeyDown={(e) => { if (e.key === 'Enter') void enroll(u, key); }}
                         aria-label={`Name to enroll for sighting ${u.track_id ?? key}`}
                         disabled={enrollingKey === key}
                       />
@@ -213,6 +214,10 @@ export function KnownPeopleList() {
   const [removingName, setRemovingName] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [removedNote, setRemovedNote] = useState<string | null>(null);
+  // Latest recognition confidence per person, derived from recent events.
+  // The /identities endpoint returns no confidence, so this is the only
+  // source. A person with no scored event shows "confidence not reported".
+  const [confidenceByName, setConfidenceByName] = useState<Record<string, number>>({});
 
   const load = useCallback(async () => {
     try {
@@ -226,11 +231,34 @@ export function KnownPeopleList() {
     }
   }, []);
 
+  const loadConfidence = useCallback(async () => {
+    try {
+      const events = await fetchEvents(undefined, 100);
+      const latest = new Map<string, { at: number; value: number }>();
+      for (const event of events) {
+        const name = event.person_name;
+        const value = event.person_name_confidence;
+        if (!name || typeof value !== 'number' || !Number.isFinite(value)) continue;
+        const at = Date.parse(event.timestamp);
+        const prev = latest.get(name);
+        if (!prev || (!Number.isNaN(at) && at >= prev.at)) {
+          latest.set(name, { at: Number.isNaN(at) ? 0 : at, value });
+        }
+      }
+      const next: Record<string, number> = {};
+      for (const [name, entry] of latest) next[name] = entry.value;
+      setConfidenceByName(next);
+    } catch {
+      // Confidence is secondary; the list keeps working without it.
+    }
+  }, []);
+
   useEffect(() => {
     void load();
-    const id = window.setInterval(() => { void load(); }, POLL_MS);
+    void loadConfidence();
+    const id = window.setInterval(() => { void load(); void loadConfidence(); }, POLL_MS);
     return () => window.clearInterval(id);
-  }, [load]);
+  }, [load, loadConfidence]);
 
   const remove = async (name: string) => {
     if (!window.confirm(`Remove ${name} from known people?`)) return;
@@ -281,8 +309,15 @@ export function KnownPeopleList() {
           {identities.map((p) => (
             <div key={p.name} style={rowStyle()}>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 15 }}>
-                  {p.name}
+                <div style={{ display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap' }}>
+                  <span style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 15 }}>
+                    {p.name}
+                  </span>
+                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12.5, color: 'var(--text-2)' }}>
+                    {typeof confidenceByName[p.name] === 'number'
+                      ? `confidence ${confidenceByName[p.name].toFixed(2)}`
+                      : 'confidence not reported'}
+                  </span>
                 </div>
                 <p style={{ margin: '4px 0 0', color: 'var(--text-2)', fontSize: 13 }}>
                   Last seen {formatClock(p.last_seen ?? null)}
