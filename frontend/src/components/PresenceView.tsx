@@ -51,6 +51,28 @@ function formatUtcClock(value: string | null): string {
     : instant.toLocaleString(undefined, { timeZone: "UTC" });
 }
 
+/** Plain-words duration, e.g. "2 h 15 min", "45 min", "under a minute". */
+function plainDuration(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return "-";
+  if (ms < 60000) return "under a minute";
+  const min = Math.floor(ms / 60000);
+  if (min < 60) return `${min} min`;
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  if (h < 24) return m === 0 ? `${h} h` : `${h} h ${m} min`;
+  const d = Math.floor(h / 24);
+  return `${d} day${d === 1 ? "" : "s"} ${h % 24} h`;
+}
+
+/** Plain-words time since an instant, e.g. "3 min ago", "just now". */
+function plainAgo(value: string | null, nowMs: number): string {
+  if (!value) return "never";
+  const ms = nowMs - new Date(value).getTime();
+  if (Number.isNaN(ms) || ms < 0) return "just now";
+  if (ms < 60000) return "just now";
+  return `${plainDuration(ms)} ago`;
+}
+
 const STATE_TONE: Record<PresenceState, "ok" | "warn" | "bad" | "idle"> = {
   PRESENT_AND_ACTIVE: "ok",
   PRESENT_BUT_IDLE: "warn",
@@ -107,6 +129,13 @@ export default function PresenceView({ officeId = "" }: { officeId?: string }) {
 
   const anomalies = items.filter((i) => i.anomaly);
   const present = items.filter((i) => i.state === "PRESENT_AND_ACTIVE").length;
+  // First seen today per employee, from the daily attendance rollup, so a
+  // station can say how long someone has been here in plain words.
+  const firstSeenByEmployee = new Map<string, string>();
+  for (const row of attendance?.items ?? []) {
+    if (row.first_seen) firstSeenByEmployee.set(row.employee_id, row.first_seen);
+  }
+  const nowMs = Date.now();
 
   return (
     <div className="rise">
@@ -140,7 +169,9 @@ export default function PresenceView({ officeId = "" }: { officeId?: string }) {
             Each station combines the latest person detection in the workstation camera zone with
             recent workstation input. Zone to machine mapping comes from the{" "}
             <code>WAMSS_ZONE_MAP</code> backend setting; the lookback window from{" "}
-            <code>WAMSS_PRESENCE_WINDOW_SEC</code> (default 300 seconds).
+            <code>WAMSS_PRESENCE_WINDOW_SEC</code> (default 300 seconds). Dwell time is measured
+            from first seen in today&apos;s attendance rollup, and falls back to the last camera
+            sighting when no attendance link exists.
           </p>
         </section>
       </Reveal>
@@ -204,6 +235,11 @@ export default function PresenceView({ officeId = "" }: { officeId?: string }) {
           <div className="station-grid">
             {items.map((item, i) => {
               const tone = STATE_TONE[item.state] ?? "idle";
+              const firstSeen = item.employee_id ? firstSeenByEmployee.get(item.employee_id) : undefined;
+              const hereNow = item.state === "PRESENT_AND_ACTIVE" || item.state === "PRESENT_BUT_IDLE";
+              const dwell = hereNow && firstSeen
+                ? `here for ${plainDuration(nowMs - new Date(firstSeen).getTime())} (since ${formatClock(firstSeen)})`
+                : `last seen ${plainAgo(item.last_vision_seen, nowMs)}`;
               return (
                 <article
                   key={item.machine_id}
@@ -225,11 +261,12 @@ export default function PresenceView({ officeId = "" }: { officeId?: string }) {
                   </p>
                   <dl style={{ margin: 0 }}>
                     <div className="kv"><dt>Zone</dt><dd>{item.zone}</dd></div>
+                    <div className="kv"><dt>Dwell</dt><dd>{dwell}</dd></div>
                     <div className="kv"><dt>Person present</dt><dd>{item.person_present ? "yes" : "no"}</dd></div>
                     <div className="kv"><dt>Workstation active</dt><dd>{item.active ? "yes" : "no"}</dd></div>
                     <div className="kv"><dt>Employee</dt><dd>{item.employee_id || "-"}</dd></div>
-                    <div className="kv"><dt>Last seen (camera)</dt><dd>{formatClock(item.last_vision_seen)}</dd></div>
-                    <div className="kv"><dt>Last input (computer)</dt><dd>{formatClock(item.last_activity_seen)}</dd></div>
+                    <div className="kv"><dt>Last seen (camera)</dt><dd>{formatClock(item.last_vision_seen)} ({plainAgo(item.last_vision_seen, nowMs)})</dd></div>
+                    <div className="kv"><dt>Last input (computer)</dt><dd>{formatClock(item.last_activity_seen)} ({plainAgo(item.last_activity_seen, nowMs)})</dd></div>
                   </dl>
                 </article>
               );
