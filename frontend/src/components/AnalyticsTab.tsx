@@ -234,7 +234,11 @@ export default function AnalyticsTab() {
           <p style={{ color: "var(--text-2)", fontSize: 13, margin: 0, maxWidth: "80ch" }}>
             {metric === "focus"
               ? "Weekly mean of your daily focus scores. Days with no data are excluded."
-              : "Weekly mean of your strain scores with green/amber/red level counts. Strain is a heuristic workload signal, not a medical measure."}
+              : "Weekly mean of your strain scores with green/amber/red level counts. Strain is a heuristic workload signal, not a medical measure."}{" "}
+            This is a personal rollup: it covers only your own data, scoped to your employee
+            token, using the same daily scores as the Focus tab and the same strain scores
+            as the Activity ledger. No other employee&apos;s data contributes, and no team
+            numbers appear here.
           </p>
         </section>
       </Reveal>
@@ -265,7 +269,7 @@ export default function AnalyticsTab() {
         <>
           <Reveal>
             <section className="panel" aria-label="Personal weekly average">
-              <SectionHead title="Your Average per Week" />
+              <SectionHead title="Your Average per Week" meta="personal, not team" />
               <div key={`${metric}-${weeks}`}>
                 {metric === "focus" ? (
                   <BarChart
@@ -353,6 +357,11 @@ export default function AnalyticsTab() {
                   <Chip tone="bad">{(latestPersonal as PersonalStrainRow).red} red</Chip>
                 </p>
               )}
+              <p style={{ color: "var(--text-2)", fontSize: 13, marginTop: 12 }}>
+                Only your rows appear here by design. The weekly values come from the same
+                daily focus scorer and the same activity rows as the Focus and Activity tabs,
+                so there is no second source of truth.
+              </p>
             </section>
           </Reveal>
         </>
