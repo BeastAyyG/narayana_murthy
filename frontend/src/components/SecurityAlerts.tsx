@@ -32,6 +32,35 @@ function railClass(eventType: string, severity: string): string {
   return t === "bad" ? "alert-rail-bad" : t === "warn" ? "alert-rail-warn" : "alert-rail-idle";
 }
 
+function severityTone(severity: string): "bad" | "warn" | "idle" {
+  if (severity === "high") return "bad";
+  if (severity === "medium") return "warn";
+  return "idle";
+}
+
+function severityLabel(severity: string): string {
+  if (severity === "high") return "High severity";
+  if (severity === "medium") return "Medium severity";
+  return "Low severity";
+}
+
+// In-file part of the source-event link (brief principle 3: every number
+// traces to its underlying event). The alert id IS the underlying security
+// event row id: backend flag_anomalies passes the stored event id through
+// unchanged, and GET /security/alerts returns it as AlertOut.id. There is
+// no camera on a workstation security event, so no camera is shown and
+// none is invented. Cross-tab navigation to the Vision Events tab needs
+// App-level tab state, which lives outside this component: this button
+// dispatches a wamss:show-event CustomEvent carrying the source event id,
+// and the App shell must listen for it and open the Vision Events tab.
+// Until that wiring lands, the source event id below is the traceable link.
+function requestSourceEvent(eventId: number | null) {
+  if (eventId === null) return;
+  window.dispatchEvent(
+    new CustomEvent("wamss:show-event", { detail: { eventId } }),
+  );
+}
+
 function formatDetail(detail: Record<string, unknown> | null): string {
   if (!detail) return "";
   if (typeof detail.device === "string") return `Device: ${detail.device}`;
@@ -141,13 +170,35 @@ export default function SecurityAlerts({ officeId = "" }: { officeId?: string })
                   <Chip tone={eventTone(a.event_type, a.severity)}>
                     {a.event_type.replace(/_/g, " ").toUpperCase()}
                   </Chip>
+                  <Chip tone={severityTone(a.severity)}>{severityLabel(a.severity)}</Chip>
                   <div className="alert-row-body">
                     <p className="alert-row-reason">{a.reason}</p>
                     <p className="alert-row-meta">
-                      <span className="id">{a.machine_id}</span> &middot;{' '}
-                      <span className="id">{a.employee_id}</span> &middot;{' '}
+                      Source event:{" "}
+                      {a.id === null ? (
+                        <span>source: not recorded</span>
+                      ) : (
+                        <span className="id">{a.id}</span>
+                      )}{" "}
+                      &middot;{" "}
+                      <span className="id">{a.machine_id}</span> &middot;{" "}
+                      <span className="id">{a.employee_id}</span> &middot;{" "}
                       {new Date(a.timestamp).toLocaleString()}
                       {formatDetail(a.detail) ? ` · ${formatDetail(a.detail)}` : ""}
+                    </p>
+                    <p className="alert-row-meta">
+                      Camera: not recorded for workstation events.{" "}
+                      {a.id === null ? (
+                        <span>No source event was recorded for this alert.</span>
+                      ) : (
+                        <button
+                          type="button"
+                          className="btn"
+                          onClick={() => requestSourceEvent(a.id)}
+                        >
+                          View source event {a.id}
+                        </button>
+                      )}
                     </p>
                   </div>
                 </li>
@@ -159,7 +210,9 @@ export default function SecurityAlerts({ officeId = "" }: { officeId?: string })
             Signals: USB insert/remove (always flagged), after-hours activity (outside
             WAMSS_WORK_HOURS), and file write bursts above WAMSS_DLP_WRITE_THRESHOLD_MB
             per interval. Workstation agents report byte counts only; no file or keystroke
-            content is ever captured.
+            content is ever captured. Each alert shows its source security event id above.
+            Opening that event in the Vision Events tab needs App-level wiring for the
+            wamss:show-event signal; until then the id is the traceable link.
           </p>
         </section>
       </Reveal>
