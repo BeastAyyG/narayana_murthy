@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { getApiUrl } from '../api';
+import { Chip } from './ui';
 
 type Checkin = { employee_id: string; message: string };
 type CheckinResponse = { checkins: Checkin[] };
@@ -86,9 +87,13 @@ export default function ManagerCheckins() {
       {error && <p className="notice notice-error" role="alert">{error}</p>}
       {managerToken && !loading && !error && (checkins.length === 0
         ? <p>No supportive check-in prompts are available for your authorized roster.</p>
-        : <ul>{checkins.map((item) => <li key={item.employee_id}>
-          <strong>{item.employee_id}</strong><p>{item.message}</p>
-        </li>)}</ul>)}
+        : <>
+          <ul>{checkins.map((item) => <li key={item.employee_id}>
+            <Chip tone="idle">Check-in prompt</Chip>{' '}
+            <strong>{item.employee_id}</strong><p>{item.message}</p>
+          </li>)}</ul>
+          <p className="wellness-privacy-note">That is all this view shows for each person: an employee ID and one generic prompt. No score, no health value, no activity value, and no reason is shown or stored here.</p>
+        </>)}
       {loading && <p aria-live="polite">Loading authorized check-ins…</p>}
     </section>
   );
